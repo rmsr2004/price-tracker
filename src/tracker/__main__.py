@@ -4,6 +4,9 @@ import typer
 from pydantic import ValidationError
 
 from tracker.config import Settings, get_missing_settings_fields, get_settings
+from tracker.exceptions import FetchError
+from tracker.extractors import extract_price
+from tracker.fetcher import fetch
 
 app = typer.Typer(
     name="tracker",
@@ -43,8 +46,6 @@ def ensure_settings() -> Settings:
 @app.callback(invoke_without_command=True)
 def main_callback(ctx: typer.Context) -> None:
     """Global callback for tracker CLI."""
-    # If no subcommand was invoked and help was not requested,
-    # validate settings and display help.
     if ctx.invoked_subcommand is None:
         ensure_settings()
         typer.echo(ctx.get_help())
@@ -128,8 +129,36 @@ def check_url(
     ),
 ) -> None:
     """Check price extraction for a URL without saving to database."""
-    ensure_settings()
-    typer.echo(f"Command 'check-url' is not implemented yet. URL: {url}")
+    try:
+        html = fetch(url)
+    except FetchError as err:
+        typer.echo(f"Fetch error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+
+    result = extract_price(html, url, css_selector=css_selector)
+    if result is None or result.price is None:
+        typer.echo(f"Could not extract price from URL: {url}", err=True)
+        typer.echo(
+            "The website does not expose price data via JSON-LD or meta tags.",
+            err=True,
+        )
+        typer.echo(
+            'Try providing a custom CSS selector using --css-selector (e.g. --css-selector ".price").',
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    in_stock_str = "Unknown"
+    if result.in_stock is True:
+        in_stock_str = "Yes"
+    elif result.in_stock is False:
+        in_stock_str = "No"
+
+    typer.echo(f"URL:       {url}")
+    typer.echo(f"Name:      {result.name or 'Unknown'}")
+    typer.echo(f"Price:     {result.price:.2f} {result.currency}")
+    typer.echo(f"In Stock:  {in_stock_str}")
+    typer.echo(f"Method:    {result.method}")
 
 
 @app.command(name="run")
