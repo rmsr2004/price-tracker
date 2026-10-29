@@ -1,0 +1,1 @@
+"""Base price extractor interface."""
