@@ -2,14 +2,17 @@
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from tracker.__main__ import app, main
 from tracker.config import get_settings
+from tracker.exceptions import FetchError
 
 runner = CliRunner()
+FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "html"
 
 
 @pytest.fixture(autouse=True)
@@ -75,7 +78,10 @@ def test_cli_missing_env_vars_prints_clear_error(monkeypatch: pytest.MonkeyPatch
 
     result = runner.invoke(app, ["run"])
     assert result.exit_code == 1
-    assert "Configuration error: Missing required environment variable(s):" in result.output
+    assert (
+        "Configuration error: Missing required environment variable(s):"
+        in result.output
+    )
     assert "DATABASE_URL" in result.output
     assert "SMTP_HOST" in result.output
     assert "SMTP_USER" in result.output
@@ -94,7 +100,9 @@ def test_cli_invalid_config_type_error(monkeypatch: pytest.MonkeyPatch, mock_val
     assert "SMTP_PORT" in result.output or "smtp_port" in result.output
 
 
-def test_cli_no_args_without_env_vars_prints_clear_error(monkeypatch: pytest.MonkeyPatch):
+def test_cli_no_args_without_env_vars_prints_clear_error(
+    monkeypatch: pytest.MonkeyPatch,
+):
     """Test that running tracker with no arguments without env vars exits with code 1 and error."""
     for key in [
         "DATABASE_URL",
@@ -109,7 +117,10 @@ def test_cli_no_args_without_env_vars_prints_clear_error(monkeypatch: pytest.Mon
 
     result = runner.invoke(app, [])
     assert result.exit_code == 1
-    assert "Configuration error: Missing required environment variable(s):" in result.output
+    assert (
+        "Configuration error: Missing required environment variable(s):"
+        in result.output
+    )
 
 
 def test_cli_no_args_with_valid_env_shows_help(mock_valid_env):
@@ -127,18 +138,73 @@ def test_cli_no_args_with_valid_env_shows_help(mock_valid_env):
         (["remove", "1"], "Command 'remove' is not implemented yet."),
         (["reactivate", "1"], "Command 'reactivate' is not implemented yet."),
         (["set-target", "1", "100.0"], "Command 'set-target' is not implemented yet."),
-        (["check-url", "https://example.com/p"], "Command 'check-url' is not implemented yet."),
         (["run", "--dry-run"], "Command 'run' is not implemented yet."),
         (["send-test-email"], "Command 'send-test-email' is not implemented yet."),
-        (["simulate", "--product-id", "1", "--price", "99.99"], "Command 'simulate' is not implemented yet."),
+        (
+            ["simulate", "--product-id", "1", "--price", "99.99"],
+            "Command 'simulate' is not implemented yet.",
+        ),
         (["status"], "Command 'status' is not implemented yet."),
     ],
 )
-def test_all_subcommands_execute_stubs_with_valid_env(mock_valid_env, args, expected_output):
+def test_all_subcommands_execute_stubs_with_valid_env(
+    mock_valid_env, args, expected_output
+):
     """Test all stub commands execute and print placeholder messages."""
     result = runner.invoke(app, args)
     assert result.exit_code == 0
     assert expected_output in result.output
+
+
+def test_cli_check_url_success_jsonld(monkeypatch: pytest.MonkeyPatch):
+    """Test check-url prints extracted info and exits 0 on success."""
+    html_content = (FIXTURES_DIR / "product_jsonld.html").read_text(encoding="utf-8")
+    monkeypatch.setattr("tracker.__main__.fetch", lambda url: html_content)
+
+    result = runner.invoke(app, ["check-url", "https://example.com/headphones"])
+    assert result.exit_code == 0
+    assert "Sony WH-1000XM5" in result.output
+    assert "199.00 EUR" in result.output
+    assert "In Stock:  Yes" in result.output
+    assert "Method:    json-ld" in result.output
+
+
+def test_cli_check_url_success_with_css_selector(monkeypatch: pytest.MonkeyPatch):
+    """Test check-url with custom CSS selector succeeds."""
+    html_content = (FIXTURES_DIR / "product_css.html").read_text(encoding="utf-8")
+    monkeypatch.setattr("tracker.__main__.fetch", lambda url: html_content)
+
+    result = runner.invoke(
+        app,
+        ["check-url", "https://example.com/phone", "--css-selector", ".price"],
+    )
+    assert result.exit_code == 0
+    assert "1299.00 EUR" in result.output
+    assert "Method:    css" in result.output
+
+
+def test_cli_check_url_no_price_suggests_css_selector(monkeypatch: pytest.MonkeyPatch):
+    """Test check-url prints clear error and suggests --css-selector when no price found."""
+    html_content = (FIXTURES_DIR / "product_no_price.html").read_text(encoding="utf-8")
+    monkeypatch.setattr("tracker.__main__.fetch", lambda url: html_content)
+
+    result = runner.invoke(app, ["check-url", "https://example.com/blog"])
+    assert result.exit_code == 1
+    assert "Could not extract price" in result.output
+    assert "--css-selector" in result.output
+
+
+def test_cli_check_url_fetch_error(monkeypatch: pytest.MonkeyPatch):
+    """Test check-url handles FetchError cleanly."""
+
+    def fail_fetch(url: str):
+        raise FetchError(url=url, message="404 Not Found", status_code=404)
+
+    monkeypatch.setattr("tracker.__main__.fetch", fail_fetch)
+
+    result = runner.invoke(app, ["check-url", "https://example.com/notfound"])
+    assert result.exit_code == 1
+    assert "Fetch error:" in result.output
 
 
 def test_main_function_entry_point(mock_valid_env):
