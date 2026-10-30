@@ -19,3 +19,15 @@ class FetchError(TrackerError):
         self.status_code = status_code
         status_detail = f" (status code: {status_code})" if status_code else ""
         super().__init__(f"Failed to fetch '{url}'{status_detail}: {message}")
+
+
+class NoPriceFoundError(TrackerError):
+    """Raised when a product page has no extractable price."""
+
+
+class DuplicateProductError(TrackerError):
+    """Raised when a product URL is already being tracked."""
+
+
+class ProductNotFoundError(TrackerError):
+    """Raised when a product cannot be found by ID or URL."""

@@ -133,11 +133,6 @@ def test_cli_no_args_with_valid_env_shows_help(mock_valid_env):
 @pytest.mark.parametrize(
     ("args", "expected_output"),
     [
-        (["add", "https://example.com/p"], "Command 'add' is not implemented yet."),
-        (["list"], "Command 'list' is not implemented yet."),
-        (["remove", "1"], "Command 'remove' is not implemented yet."),
-        (["reactivate", "1"], "Command 'reactivate' is not implemented yet."),
-        (["set-target", "1", "100.0"], "Command 'set-target' is not implemented yet."),
         (["run", "--dry-run"], "Command 'run' is not implemented yet."),
         (["send-test-email"], "Command 'send-test-email' is not implemented yet."),
         (
