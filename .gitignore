@@ -25,9 +25,6 @@ venv/
 .DS_Store
 Thumbs.db
 
-# uv
-uv.lock
-
 # Testing & Coverage
 .pytest_cache/
 .coverage
@@ -48,4 +45,3 @@ __marimo__/
 
 # Local plans
 plans/
-uv.lock
