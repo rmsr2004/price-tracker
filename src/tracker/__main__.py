@@ -1,8 +1,11 @@
 """CLI entry point for price tracker."""
 
+import smtplib
+
 import typer
 from pydantic import ValidationError
 
+from tracker.alerts import evaluate_alerts
 from tracker.config import Settings, get_missing_settings_fields, get_settings
 from tracker.db import get_session
 from tracker.exceptions import (
@@ -13,6 +16,8 @@ from tracker.exceptions import (
 )
 from tracker.extractors import extract_price
 from tracker.fetcher import fetch
+from tracker.notifier import send_alert_email
+from tracker.notifier import send_test_email as send_test_email_notification
 from tracker.products import (
     add_product as add_product_logic,
 )
@@ -31,6 +36,13 @@ from tracker.products import (
 )
 from tracker.products import (
     remove_product as remove_product_logic,
+)
+from tracker.repository import (
+    add_alert,
+    get_alerts_in_last_hours,
+    get_latest_price,
+    get_price_history,
+    get_product_by_id,
 )
 
 app = typer.Typer(
@@ -318,8 +330,15 @@ def run_tracker(
 @app.command(name="send-test-email")
 def send_test_email() -> None:
     """Send a test email via Brevo SMTP to verify email configuration."""
-    ensure_settings()
-    typer.echo("Command 'send-test-email' is not implemented yet.")
+    settings = ensure_settings()
+    try:
+        send_test_email_notification()
+    except smtplib.SMTPException as error:
+        typer.echo(f"SMTP error: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(
+        f"Test email sent to {settings.mail_to}. Check your inbox (and spam folder)."
+    )
 
 
 @app.command(name="simulate")
@@ -329,9 +348,76 @@ def simulate_price(
 ) -> None:
     """Simulate a price change and trigger test notification."""
     ensure_settings()
-    typer.echo(
-        f"Command 'simulate' is not implemented yet. Product ID: {product_id}, Price: {price}"
-    )
+    try:
+        with get_session() as session:
+            product = get_product_by_id(session, product_id)
+            if product is None:
+                typer.echo(f"Product with ID {product_id} not found.", err=True)
+                raise typer.Exit(code=1)
+
+            previous = get_latest_price(session, product_id, status_ok_only=True)
+            if previous is None or previous.price is None:
+                typer.echo(
+                    "No previous successful price is available for this product.",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+
+            recent_alerts = get_alerts_in_last_hours(session, product_id)
+            consecutive_failures = _count_consecutive_failures(session, product_id)
+            decision = evaluate_alerts(
+                current_price=price,
+                previous_price=float(previous.price),
+                target_price=(
+                    float(product.target_price)
+                    if product.target_price is not None
+                    else None
+                ),
+                recent_alerts=recent_alerts,
+                consecutive_failures=consecutive_failures,
+                sanity_threshold=get_settings().sanity_drop_threshold,
+            )
+            if not decision.reasons:
+                explanation = decision.message or "The alert conditions were not met."
+                typer.echo(
+                    f"No alert would be generated. Reason: {explanation} "
+                    "Try a different price or wait for the anti-spam window."
+                )
+                return
+
+            send_alert_email(
+                product_name=product.name,
+                store=product.store,
+                previous_price=float(previous.price),
+                current_price=price,
+                currency=product.currency,
+                product_url=product.url,
+                target_price=(
+                    float(product.target_price)
+                    if product.target_price is not None
+                    else None
+                ),
+                reasons=decision.reasons,
+                is_suspicious=decision.is_suspicious,
+                is_test=True,
+            )
+            add_alert(session, product_id, price, "test")
+            typer.echo(
+                f"Alert email sent for {product.name} at simulated price {price:.2f}."
+            )
+    except smtplib.SMTPException as error:
+        typer.echo(f"SMTP error: {error}", err=True)
+        raise typer.Exit(code=1) from error
+
+
+def _count_consecutive_failures(session, product_id: int) -> int:
+    """Count the latest failed checks until the most recent successful check."""
+    failures = 0
+    for record in get_price_history(session, product_id):
+        if record.status == "ok":
+            break
+        failures += 1
+    return failures
 
 
 @app.command(name="status")

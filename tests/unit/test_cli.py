@@ -134,18 +134,13 @@ def test_cli_no_args_with_valid_env_shows_help(mock_valid_env):
     ("args", "expected_output"),
     [
         (["run", "--dry-run"], "Command 'run' is not implemented yet."),
-        (["send-test-email"], "Command 'send-test-email' is not implemented yet."),
-        (
-            ["simulate", "--product-id", "1", "--price", "99.99"],
-            "Command 'simulate' is not implemented yet.",
-        ),
         (["status"], "Command 'status' is not implemented yet."),
     ],
 )
-def test_all_subcommands_execute_stubs_with_valid_env(
+def test_remaining_stub_subcommands_execute_with_valid_env(
     mock_valid_env, args, expected_output
 ):
-    """Test all stub commands execute and print placeholder messages."""
+    """Test commands that are intentionally still placeholders."""
     result = runner.invoke(app, args)
     assert result.exit_code == 0
     assert expected_output in result.output
