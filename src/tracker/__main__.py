@@ -40,10 +40,12 @@ from tracker.products import (
 from tracker.repository import (
     add_alert,
     get_alerts_in_last_hours,
+    get_all_products,
     get_latest_price,
     get_price_history,
     get_product_by_id,
 )
+from tracker.runner import run as run_cycle
 
 app = typer.Typer(
     name="tracker",
@@ -324,7 +326,11 @@ def run_tracker(
 ) -> None:
     """Run price check cycle for all active products."""
     ensure_settings()
-    typer.echo(f"Command 'run' is not implemented yet. Dry run: {dry_run}")
+    try:
+        run_cycle(dry_run=dry_run)
+    except smtplib.SMTPException as error:
+        typer.echo(f"SMTP error: {error}", err=True)
+        raise typer.Exit(code=1) from error
 
 
 @app.command(name="send-test-email")
@@ -424,7 +430,47 @@ def _count_consecutive_failures(session, product_id: int) -> int:
 def status() -> None:
     """Show status of tracked products and recent checks."""
     ensure_settings()
-    typer.echo("Command 'status' is not implemented yet.")
+    with get_session() as session:
+        products = get_all_products(session)
+        active = [product for product in products if product.active]
+        latest_checks = [get_latest_price(session, product.id) for product in products]
+        latest_times = [
+            check.checked_at for check in latest_checks if check is not None
+        ]
+
+        typer.echo("Price Tracker Status\n")
+        typer.echo(
+            f"Products:     {len(active)} active, {len(products) - len(active)} inactive"
+        )
+        if latest_times:
+            latest = max(latest_times)
+            typer.echo(f"Last Check:   {_format_datetime(latest)} UTC")
+        else:
+            typer.echo("Last Check:   —")
+
+        typer.echo("\nProduct Status:")
+        typer.echo("  ID  Name  Store  Last Price  Last Check  Failures")
+        for product in products:
+            latest = get_latest_price(session, product.id)
+            latest_ok = get_latest_price(session, product.id, status_ok_only=True)
+            failures = _count_consecutive_failures(session, product.id)
+            price = (
+                f"{float(latest_ok.price):.2f} {product.currency}"
+                if latest_ok and latest_ok.price is not None
+                else "—"
+            )
+            typer.echo(
+                f"  {product.id}   {product.name}  {product.store}  {price}  "
+                f"{_format_datetime(latest.checked_at) if latest else '—'}  {failures}"
+            )
+
+        typer.echo("\nRecent Alerts (last 7 days):")
+        for product in products:
+            for alert in get_alerts_in_last_hours(session, product.id, 24 * 7):
+                typer.echo(
+                    f"  {_format_datetime(alert.sent_at)}  {product.name}  "
+                    f"{float(alert.price):.2f}  {alert.reason}"
+                )
 
 
 def main() -> None:

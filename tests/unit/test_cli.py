@@ -130,22 +130,6 @@ def test_cli_no_args_with_valid_env_shows_help(mock_valid_env):
     assert "Price Tracker" in result.output
 
 
-@pytest.mark.parametrize(
-    ("args", "expected_output"),
-    [
-        (["run", "--dry-run"], "Command 'run' is not implemented yet."),
-        (["status"], "Command 'status' is not implemented yet."),
-    ],
-)
-def test_remaining_stub_subcommands_execute_with_valid_env(
-    mock_valid_env, args, expected_output
-):
-    """Test commands that are intentionally still placeholders."""
-    result = runner.invoke(app, args)
-    assert result.exit_code == 0
-    assert expected_output in result.output
-
-
 def test_cli_check_url_success_jsonld(monkeypatch: pytest.MonkeyPatch):
     """Test check-url prints extracted info and exits 0 on success."""
     html_content = (FIXTURES_DIR / "product_jsonld.html").read_text(encoding="utf-8")
